@@ -59,5 +59,6 @@ while true; do
 done
 
 # --- Connect via SSH ---
+sleep 5
 echo "Connecting via SSH..."
 gcloud compute ssh "$GCLOUD_INSTANCE_ID" --zone="$GCLOUD_ZONE"
