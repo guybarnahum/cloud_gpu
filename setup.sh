@@ -108,22 +108,35 @@ echo "Adding aliases to $SHELL_RC..."
 if ! grep -qF "$ALIAS_BLOCK_START" "$SHELL_RC" 2>/dev/null; then
   {
     echo "$ALIAS_BLOCK_START"
+  
     echo "alias gcloud-start='$SCRIPT_DIR/gcloud-start.sh'"
     echo "alias gcloud-stop='$SCRIPT_DIR/gcloud-stop.sh'"
+    echo "alias gcloud-scp-to='$SCRIPT_DIR/gcloud-scp-to.sh'"
+    echo "alias gcloud-scp-from='$SCRIPT_DIR/gcloud-scp-from.sh'"
+
     echo "alias aws-start='$SCRIPT_DIR/aws-start.sh'"
     echo "alias aws-stop='$SCRIPT_DIR/aws-stop.sh'"
+  
     echo "$ALIAS_BLOCK_END"
   } >> "$SHELL_RC"
-  
+
+else
+  echo "ℹ️  Aliases already present in $SHELL_RC."
+fi
+
+if [[ "$0" == "${BASH_SOURCE[0]}" ]]; then
+  echo "⚠️ To activate aliases source $SHELL_RC"
+else
   # Add aliases to current session for immediate use
   alias gcloud-start="$SCRIPT_DIR/gcloud-start.sh"
   alias gcloud-stop="$SCRIPT_DIR/gcloud-stop.sh"
+  alias gcloud-scp-to="$SCRIPT_DIR/gcloud-scp-to.sh"
+  alias gcloud-scp-from="$SCRIPT_DIR/gcloud-scp-from.sh"
+
   alias aws-start="$SCRIPT_DIR/aws-start.sh"
   alias aws-stop="$SCRIPT_DIR/aws-stop.sh"
-  
+
   echo "✅ Aliases added. They are now available in this session."
-else
-  echo "ℹ️  Aliases already present in $SHELL_RC."
 fi
 
 echo "🎉 Setup complete!"

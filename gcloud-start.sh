@@ -33,7 +33,30 @@ echo "🚀 Starting instance '$GCLOUD_INSTANCE_ID' in zone '$GCLOUD_ZONE'..."
 # --- Start the instance ---
 gcloud compute instances start "$GCLOUD_INSTANCE_ID" --zone="$GCLOUD_ZONE"
 
-echo "✅ Instance '$GCLOUD_INSTANCE_ID' is now running."
+# --- Wait for the instance to be running ---
+echo "✅ Instance start request sent. Waiting for the instance to become RUNNING..."
+
+# --- Wait for the instance to be running with a timeout ---
+TIMEOUT=60 # 10 minutes in seconds
+start_time=$(date +%s)
+
+while true; do
+  current_time=$(date +%s)
+  elapsed_time=$((current_time - start_time))
+
+  if [[ "$elapsed_time" -gt "$TIMEOUT" ]]; then
+    echo "❌ Error: Timeout reached after $TIMEOUT seconds. Instance did not become RUNNING."
+    exit 1
+  fi
+
+  STATUS=$(gcloud compute instances describe "$GCLOUD_INSTANCE_ID" --zone="$GCLOUD_ZONE" --format="value(status)")
+  if [[ "$STATUS" == "RUNNING" ]]; then
+    echo "✅ Instance '$GCLOUD_INSTANCE_ID' is now running."
+    break
+  fi
+  echo "⏳ Current status: $STATUS. Waiting 10 seconds..."
+  sleep 5
+done
 
 # --- Connect via SSH ---
 echo "Connecting via SSH..."
