@@ -116,7 +116,9 @@ if ! grep -qF "$ALIAS_BLOCK_START" "$SHELL_RC" 2>/dev/null; then
 
     echo "alias aws-start='$SCRIPT_DIR/aws-start.sh'"
     echo "alias aws-stop='$SCRIPT_DIR/aws-stop.sh'"
-  
+    echo "alias aws-scp-to='$SCRIPT_DIR/aws-scp-to.sh'"
+    echo "alias aws-scp-from='$SCRIPT_DIR/aws-scp-from.sh'"
+
     echo "$ALIAS_BLOCK_END"
   } >> "$SHELL_RC"
 
@@ -135,6 +137,8 @@ else
 
   alias aws-start="$SCRIPT_DIR/aws-start.sh"
   alias aws-stop="$SCRIPT_DIR/aws-stop.sh"
+  alias aws-scp-to="$SCRIPT_DIR/aws-scp-to.sh"
+  alias aws-scp-from="$SCRIPT_DIR/aws-scp-from.sh"
 
   echo "✅ Aliases added. They are now available in this session."
 fi
