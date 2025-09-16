@@ -72,6 +72,10 @@ wait_for_instance_state() {
 
 # --- Main script execution ---
 echo "🛑 Stopping instance '$AWS_EC2_INSTANCE_ID' in region '$AWS_EC2_REGION'..."
+echo ""
+echo "💡 Heads up: Gracefully stopping an instance can take 1-3 minutes to sync data."
+echo "☕  This is the perfect time to grab a coffee! ☕"
+
 aws ec2 stop-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_EC2_REGION" > /dev/null
 echo "✅ Instance stop request sent."
 
