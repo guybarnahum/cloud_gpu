@@ -36,6 +36,17 @@ if [[ "$PEM_PERMS" != "400" ]]; then
   echo "    To fix, run: chmod 400 \"$AWS_EC2_PEM_FILE\""
 fi
 
+#
+# This function displays a spinner while periodically running a check command
+# until it succeeds or a timeout is reached.
+#
+# Usage: run_with_spinner "<description>" "<check_command>" <timeout_sec> <interval_sec>
+#
+run_with_spinner() {
+  local description="$1"
+  local check_command="$2"
+  local timeout_seconds="$3"
+  local check_interval_seconds="$4"
 
   echo "$description"
 
