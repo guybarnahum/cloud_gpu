@@ -36,70 +36,68 @@ if [[ "$PEM_PERMS" != "400" ]]; then
   echo "    To fix, run: chmod 400 \"$AWS_EC2_PEM_FILE\""
 fi
 
-# --- Reusable Polling Function ---
-# Polls the state of an EC2 instance until it matches the target state or a timeout is reached.
-wait_for_instance_state() {
-  local target_state="$1"
-  local description="$2"
 
   echo "$description"
 
   local spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
-  local timeout_seconds=300
-  local animation_interval=0.5 # Animate twice per second
-  local check_interval_seconds=5 # Check status every 5 seconds
+  local animation_interval=0.2 # Animate 5 times per second for responsiveness
   
-  # Bash doesn't support floating point math. Pre-calculate iteration counts.
-  # 300s timeout / 0.5s interval = 600 iterations
-  # 5s check / 0.5s interval = check every 10 iterations
-  local max_iterations=600
-  local check_every_n_iterations=10
+  local max_iterations=$(printf "%.0f" "$(bc <<< "$timeout_seconds / $animation_interval")")
+  local check_every_n_iterations=$(printf "%.0f" "$(bc <<< "$check_interval_seconds / $animation_interval")")
   
-  local current_state="pending"
-
   for ((i=0; i<max_iterations; i++)); do
-    # Only check the instance status every 5 seconds
+    # Only run the check command at the specified interval
     if (( i % check_every_n_iterations == 0 )); then
-      current_state=$(aws ec2 describe-instances \
-        --instance-ids "$AWS_EC2_INSTANCE_ID" \
-        --region "$AWS_EC2_REGION" \
-        --query "Reservations[].Instances[].State.Name" \
-        --output text 2>/dev/null || echo "querying")
+      # Use eval to correctly execute the command string with arguments
+      if eval "$check_command"; then
+        printf "\n"
+        return 0 # Success
+      fi
     fi
 
-    # Update the spinner on every iteration
     local spin_char=${spinner[i % ${#spinner[@]}]}
-    printf "   [%s] Current state: %-15s\r" "$spin_char" "$current_state"
+    # Display a static message, as the command output is now hidden
+    printf "   [%s] Working...\r" "$spin_char"
     
-    if [[ "$current_state" == "$target_state" ]]; then
-      printf "\n"
-      return 0 # Success
-    fi
-
     sleep "$animation_interval"
   done
 
   printf "\n"
-  echo "❌ Error: Timed out after $timeout_seconds seconds. The instance is still in state: '$current_state'."
+  echo "❌ Error: Timed out after $timeout_seconds seconds."
   return 1 # Failure
 }
-# --- End of Function ---
 
+# --- Specific Wait Functions (now much simpler) ---
+
+wait_for_instance_state() {
+  local target_state="$1"
+  local description="⏳ Waiting for instance to enter '$target_state' state..."
+  # This command succeeds (exit code 0) only if grep finds the target state
+  local check_cmd="aws ec2 describe-instances --instance-ids '$AWS_EC2_INSTANCE_ID' --region '$AWS_EC2_REGION' --query 'Reservations[].Instances[].State.Name' --output text 2>/dev/null | grep -q '$target_state'"
+  
+  run_with_spinner "$description" "$check_cmd" 300 5
+}
+
+wait_for_ssh_ready() {
+  local ip_address="$1"
+  local description="⏳ Waiting for SSH service on $ip_address to become available..."
+  # This command succeeds (exit code 0) only if nc can connect to port 22
+  local check_cmd="nc -z -w 3 '$ip_address' 22 2>/dev/null"
+
+  run_with_spinner "$description" "$check_cmd" 60 2
+}
 
 # --- Main script execution ---
 echo "🚀 Starting instance $AWS_EC2_INSTANCE_ID in region $AWS_EC2_REGION..."
 aws ec2 start-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_EC2_REGION" > /dev/null
 echo "✅ Instance start request sent."
 
-# Call the polling function to wait for the instance to be running
-if ! wait_for_instance_state "running" "⏳ Waiting for instance to enter 'running' state..."; then
-  # If it times out, stop the instance to prevent unnecessary charges
+if ! wait_for_instance_state "running"; then
   echo "🛑 Stopping instance due to timeout..."
   aws ec2 stop-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_EC2_REGION" > /dev/null
   exit 1
 fi
 
-# --- Get the public IP address ---
 echo "🔎 Retrieving public IP address..."
 PUBLIC_IP=$(aws ec2 describe-instances \
   --instance-ids "$AWS_EC2_INSTANCE_ID" \
@@ -114,7 +112,13 @@ fi
 
 echo "✅ Instance is running with public IP: $PUBLIC_IP"
 
-# --- Connect via SSH ---
+if ! wait_for_ssh_ready "$PUBLIC_IP"; then
+  echo "🛑 Stopping instance due to SSH timeout..."
+  aws ec2 stop-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_EC2_REGION" > /dev/null
+  exit 1
+fi
+
+echo "✅ SSH service is ready."
 echo "🔗 Connecting via SSH to ubuntu@$PUBLIC_IP..."
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$AWS_EC2_PEM_FILE" ubuntu@"$PUBLIC_IP"
 
