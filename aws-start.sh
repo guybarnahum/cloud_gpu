@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-# aws-start.sh: Starts an EC2 instance, waits for it to become ready, and then connects via SSH.
-#
-# Usage: $0 [aws_ec2_instance_id] [aws_region] [pem_file]
-# Arguments will override values in the .env config file.
-
 # --- Get script directory and load environment variables ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$SCRIPT_DIR"
@@ -121,5 +116,5 @@ echo "✅ Instance is running with public IP: $PUBLIC_IP"
 
 # --- Connect via SSH ---
 echo "🔗 Connecting via SSH to ubuntu@$PUBLIC_IP..."
-ssh -i "$AWS_EC2_PEM_FILE" ubuntu@"$PUBLIC_IP"
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$AWS_EC2_PEM_FILE" ubuntu@"$PUBLIC_IP"
 
