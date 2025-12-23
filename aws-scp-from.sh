@@ -55,7 +55,7 @@ echo "🚀 Copying '$AWS_EC2_INSTANCE_ID:$REMOTE_PATH' to local path '$LOCAL_PAT
 
 # --- Copy the file using scp ---
 # -r allows for recursive directory copying
-scp -r -i "$SCRIPT_DIR/$AWS_EC2_PEM_FILE" "ubuntu@$PUBLIC_IP:$REMOTE_PATH" "$LOCAL_PATH"
+scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SCRIPT_DIR/$AWS_EC2_PEM_FILE" "ubuntu@$PUBLIC_IP:$REMOTE_PATH" "$LOCAL_PATH"
 
 echo "✅ Copy complete."
 
