@@ -2,86 +2,92 @@
 set -e
 
 # aws-stop.sh: Stops a running AWS EC2 instance.
-#
-# Usage: $0 [instance_id] [region]
-# Arguments will override values in the .env config file.
-
 # --- Get script directory and load environment variables ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$SCRIPT_DIR"
-if [[ -f ".env" ]]; then source .env; fi
+
+if [[ -f ".env" ]]; then 
+  set -a            # Automatically export all variables
+  source .env
+  set +a            # Stop auto-exporting
+fi
 
 # --- Argument parsing ---
+# Using AWS_DEFAULT_REGION to match your working aws-start.sh
 AWS_EC2_INSTANCE_ID="${1:-$AWS_EC2_INSTANCE_ID}"
-AWS_EC2_REGION="${2:-$AWS_EC2_REGION}"
-if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_EC2_REGION" ]]; then
+AWS_DEFAULT_REGION="${2:-$AWS_DEFAULT_REGION}"
+
+if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_DEFAULT_REGION" ]]; then
   echo "❌ Error: Missing required values." >&2
   echo "Usage: $0 <instance-id> <region>" >&2
   exit 1
 fi
 
-# --- Reusable Polling Function ---
-# Polls the state of an EC2 instance until it matches the target state or a timeout is reached.
-wait_for_instance_state() {
-  local target_state="$1"
-  local description="$2"
+echo "Using Access Key ID: ${AWS_ACCESS_KEY_ID}"
+echo "Using Region: ${AWS_DEFAULT_REGION}"
+
+#
+# This function displays a spinner while periodically running a check command
+# until it succeeds or a timeout is reached.
+#
+run_with_spinner() {
+  local description="$1"
+  local check_command="$2"
+  local timeout_seconds="$3"
+  local check_interval_seconds="$4"
 
   echo "$description"
 
   local spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
-  local timeout_seconds=300
-  local animation_interval=0.5 # Animate twice per second
-  local check_interval_seconds=5 # Check status every 5 seconds
   
-  # FIX: Bash doesn't support floating point math. Pre-calculate iteration counts.
-  # 300s timeout / 0.5s interval = 600 iterations
-  # 5s check / 0.5s interval = check every 10 iterations
-  local max_iterations=600
-  local check_every_n_iterations=10
+  # Convert everything to milliseconds for integer math
+  local interval_ms=200 
+  local timeout_ms=$(( timeout_seconds * 1000 ))
+  local check_every_ms=$(( check_interval_seconds * 1000 ))
   
-  local current_state="pending"
+  local elapsed_ms=0
 
-  for ((i=0; i<max_iterations; i++)); do
-    # Only check the instance status every 5 seconds (10 iterations)
-    if (( i % check_every_n_iterations == 0 )); then
-      current_state=$(aws ec2 describe-instances \
-        --instance-ids "$AWS_EC2_INSTANCE_ID" \
-        --region "$AWS_EC2_REGION" \
-        --query "Reservations[].Instances[].State.Name" \
-        --output text 2>/dev/null || echo "querying")
+  while [ $elapsed_ms -lt $timeout_ms ]; do
+    # Only run the check command at the specified interval
+    if (( elapsed_ms % check_every_ms == 0 )); then
+      if eval "$check_command"; then
+        printf "\n"
+        return 0 
+      fi
     fi
 
-    # Update the spinner on every iteration
-    local spin_char=${spinner[i % ${#spinner[@]}]}
-    printf "   [%s] Current state: %-15s\r" "$spin_char" "$current_state"
+    # Animate spinner
+    local spin_idx=$(( (elapsed_ms / interval_ms) % ${#spinner[@]} ))
+    printf "   [%s] Working...\r" "${spinner[$spin_idx]}"
     
-    if [[ "$current_state" == "$target_state" ]]; then
-      printf "\n"
-      return 0 # Success
-    fi
-
-    sleep "$animation_interval"
+    sleep 0.2
+    elapsed_ms=$(( elapsed_ms + interval_ms ))
   done
 
   printf "\n"
-  echo "❌ Error: Timed out after $timeout_seconds seconds. The instance is still in state: '$current_state'."
-  return 1 # Failure
+  echo "❌ Error: Timed out after $timeout_seconds seconds."
+  return 1 
 }
-# --- End of Function ---
 
+# --- Specific Wait Function ---
+
+wait_for_instance_state() {
+  local target_state="$1"
+  local description="⏳ Waiting for instance to enter '$target_state' state..."
+  # This command succeeds (exit code 0) only if grep finds the target state
+  local check_cmd="aws ec2 describe-instances --instance-ids '$AWS_EC2_INSTANCE_ID' --region '$AWS_DEFAULT_REGION' --query 'Reservations[].Instances[].State.Name' --output text 2>/dev/null | grep -q '$target_state'"
+  
+  run_with_spinner "$description" "$check_cmd" 300 5
+}
 
 # --- Main script execution ---
-echo "🛑 Stopping instance '$AWS_EC2_INSTANCE_ID' in region '$AWS_EC2_REGION'..."
-echo ""
-echo "💡 Heads up: Gracefully stopping an instance may take 10-15 minutes to sync data."
-echo "☕  This is the perfect time to grab a coffee! ☕"
-echo ""
-
-aws ec2 stop-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_EC2_REGION" > /dev/null
+echo "🛑 Stopping instance $AWS_EC2_INSTANCE_ID in region $AWS_DEFAULT_REGION..."
+aws ec2 stop-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_DEFAULT_REGION" > /dev/null
 echo "✅ Instance stop request sent."
 
-if wait_for_instance_state "stopped" "⏳ Waiting for instance to enter 'stopped' state..."; then
-  echo "✅ Instance '$AWS_EC2_INSTANCE_ID' is now stopped."
+if wait_for_instance_state "stopped"; then
+  echo "✅ Instance $AWS_EC2_INSTANCE_ID is now fully stopped."
 else
+  echo "⚠️  Warning: Script timed out, but the stop command was sent. Please check the AWS console."
   exit 1
 fi

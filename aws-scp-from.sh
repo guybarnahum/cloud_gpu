@@ -2,60 +2,78 @@
 set -e
 
 # aws-cp-from.sh: Copies a file or directory from an EC2 instance to the local machine.
-#
-# This script operates relative to the directory it is invoked from.
-#
-# Usage: $0 <remote-path> <local-path> [instance-id] [region] [pem-file]
-# Arguments will override values in the .env config file.
-
-# --- Get the directory of the script to find .env ---
+# --- Get script directory and load environment variables ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+cd "$SCRIPT_DIR"
 
-# --- Read config file (if it exists) ---
-if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  source "$SCRIPT_DIR/.env"
+if [[ -f ".env" ]]; then 
+  set -a            # Automatically export all variables
+  source .env
+  set +a            # Stop auto-exporting
 fi
 
-# --- Use arguments or fall back to config file ---
+# --- Argument parsing ---
 REMOTE_PATH="${1}"
 LOCAL_PATH="${2}"
 AWS_EC2_INSTANCE_ID="${3:-$AWS_EC2_INSTANCE_ID}"
-AWS_EC2_REGION="${4:-$AWS_EC2_REGION}"
+AWS_DEFAULT_REGION="${4:-$AWS_DEFAULT_REGION}"
 AWS_EC2_PEM_FILE="${5:-$AWS_EC2_PEM_FILE}"
 
-# --- Fail if values are not set ---
+# --- Fail if file paths are not set ---
 if [[ -z "$REMOTE_PATH" || -z "$LOCAL_PATH" ]]; then
-  echo "❌ Error: Missing required file paths."
-  echo "Usage: $0 <remote-path> <local-path> [instance-id] [region] [pem-file]"
+  echo "❌ Error: Missing required file paths." >&2
+  echo "Usage: $0 <remote-path> <local-path> [instance-id] [region] [pem-file]" >&2
   exit 1
 fi
 
-if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_EC2_REGION" || -z "$AWS_EC2_PEM_FILE" ]]; then
-  echo "❌ Error: Instance ID, region, or PEM file not specified."
-  echo "Please provide them as arguments or in a .env config file."
+# --- Fail if AWS values are not set ---
+if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_DEFAULT_REGION" || -z "$AWS_EC2_PEM_FILE" ]]; then
+  echo "❌ Error: Missing required AWS values." >&2
+  echo "Usage: $0 <remote-path> <local-path> [instance-id] [region] [pem-file]" >&2
   exit 1
 fi
 
-echo "🔎 Retrieving public IP for instance '$AWS_EC2_INSTANCE_ID'..."
+echo "Using Access Key ID: ${AWS_ACCESS_KEY_ID}"
+echo "Using Region: ${AWS_DEFAULT_REGION}"
+
+# --- Validate PEM file ---
+if [[ ! -f "$AWS_EC2_PEM_FILE" ]]; then
+  echo "❌ Error: PEM file not found at $AWS_EC2_PEM_FILE." >&2
+  exit 1
+fi
+
+# Cross-platform check for file permissions (macOS & Linux)
+PEM_PERMS=""
+if [[ "$(uname)" == "Darwin" ]]; then
+  PEM_PERMS=$(stat -f "%A" "$AWS_EC2_PEM_FILE")
+else
+  PEM_PERMS=$(stat -c "%a" "$AWS_EC2_PEM_FILE")
+fi
+
+if [[ "$PEM_PERMS" != "400" ]]; then
+  echo "⚠️  Warning: PEM file permissions are not correct (should be 400, but are $PEM_PERMS)."
+  echo "    To fix, run: chmod 400 \"$AWS_EC2_PEM_FILE\""
+fi
+
+echo "🔎 Retrieving public IP address for $AWS_EC2_INSTANCE_ID..."
 
 # --- Get the public IP address ---
 PUBLIC_IP=$(aws ec2 describe-instances \
   --instance-ids "$AWS_EC2_INSTANCE_ID" \
-  --region "$AWS_EC2_REGION" \
+  --region "$AWS_DEFAULT_REGION" \
   --query 'Reservations[].Instances[].PublicIpAddress' \
   --output text)
 
-if [[ -z "$PUBLIC_IP" ]]; then
-  echo "❌ Error: Failed to retrieve public IP address. Is the instance running?"
+if [[ -z "$PUBLIC_IP" || "$PUBLIC_IP" == "None" ]]; then
+  echo "❌ Error: Failed to retrieve public IP address. Is the instance running?" >&2
   exit 1
 fi
 
 echo "✅ Instance IP is $PUBLIC_IP"
-echo "🚀 Copying '$AWS_EC2_INSTANCE_ID:$REMOTE_PATH' to local path '$LOCAL_PATH'..."
+echo "🚀 Copying 'ubuntu@$PUBLIC_IP:$REMOTE_PATH' to '$LOCAL_PATH'..."
 
 # --- Copy the file using scp ---
 # -r allows for recursive directory copying
-scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SCRIPT_DIR/$AWS_EC2_PEM_FILE" "ubuntu@$PUBLIC_IP:$REMOTE_PATH" "$LOCAL_PATH"
+scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$AWS_EC2_PEM_FILE" "ubuntu@$PUBLIC_IP:$REMOTE_PATH" "$LOCAL_PATH"
 
 echo "✅ Copy complete."
-
