@@ -2,6 +2,10 @@
 set -e
 
 # aws-cp-from.sh: Copies a file or directory from an EC2 instance to the local machine.
+
+# --- 1. Capture the directory where the user invoked the script ---
+USER_INVOCATION_DIR="$(pwd)"
+
 # --- Get script directory and load environment variables ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$SCRIPT_DIR"
@@ -24,6 +28,13 @@ if [[ -z "$REMOTE_PATH" || -z "$LOCAL_PATH" ]]; then
   echo "❌ Error: Missing required file paths." >&2
   echo "Usage: $0 <remote-path> <local-path> [instance-id] [region] [pem-file]" >&2
   exit 1
+fi
+
+# --- 2. Fix LOCAL_PATH to be relative to the invocation directory ---
+# If LOCAL_PATH does not start with a slash (it is relative)...
+if [[ "$LOCAL_PATH" != /* ]]; then
+  # ...prepend the user's invocation directory.
+  LOCAL_PATH="$USER_INVOCATION_DIR/$LOCAL_PATH"
 fi
 
 # --- Fail if AWS values are not set ---
