@@ -124,15 +124,22 @@ run_with_spinner() {
   while [ $elapsed_ms -lt $timeout_ms ]; do
     # Only run the check command at the specified interval
     if (( elapsed_ms % check_every_ms == 0 )); then
-      if eval "$check_command"; then
+      eval "$check_command"
+      local check_rc=$?
+      if [[ $check_rc -eq 0 ]]; then
         printf "\n"
         return 0 
+      fi
+      if [[ $check_rc -eq 2 ]]; then
+        printf "\n"
+        return 2
       fi
     fi
 
     # Animate spinner
     local spin_idx=$(( (elapsed_ms / interval_ms) % ${#spinner[@]} ))
-    printf "   [%s] Working...\r" "${spinner[$spin_idx]}"
+    local spinner_text="${SPINNER_STATUS_LINE:-Working...}"
+    printf "   [%s] %s\r" "${spinner[$spin_idx]}" "$spinner_text"
     
     sleep 0.2
     elapsed_ms=$(( elapsed_ms + interval_ms ))
@@ -147,34 +154,31 @@ run_with_spinner() {
 
 wait_for_instance_state() {
   local target_state="$1"
-  local timeout_seconds=300
-  local check_interval_seconds=5
-  local elapsed_seconds=0
+  local state_error=""
+  local state_output=""
 
-  echo "⏳ Waiting for instance to enter '$target_state' state..."
-
-  while [[ $elapsed_seconds -lt $timeout_seconds ]]; do
-    local state_output
+  check_instance_state_target() {
     if ! state_output=$(aws_ec2_describe_instance_state 2>&1); then
-      printf "\n"
-      echo "❌ Error while checking instance state:" >&2
-      echo "$state_output" >&2
-      return 1
+      state_error="$state_output"
+      return 2
     fi
 
-    printf "   Current state: %-20s\r" "$state_output"
-    if [[ "$state_output" == "$target_state" ]]; then
-      printf "\n"
-      return 0
-    fi
+    SPINNER_STATUS_LINE="Current state: $state_output"
+    [[ "$state_output" == "$target_state" ]]
+  }
 
-    sleep "$check_interval_seconds"
-    elapsed_seconds=$((elapsed_seconds + check_interval_seconds))
-  done
+  SPINNER_STATUS_LINE="Current state: checking"
+  run_with_spinner "⏳ Waiting for instance to enter '$target_state' state..." "check_instance_state_target" 300 5
+  local wait_rc=$?
+  SPINNER_STATUS_LINE=""
 
-  printf "\n"
-  echo "❌ Error: Timed out after $timeout_seconds seconds waiting for '$target_state'."
-  return 1
+  if [[ $wait_rc -eq 2 ]]; then
+    echo "❌ Error while checking instance state:" >&2
+    echo "$state_error" >&2
+    return 1
+  fi
+
+  return $wait_rc
 }
 
 # --- Main script execution ---
