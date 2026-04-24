@@ -15,7 +15,8 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 # Precedence:
 #   1. --env /path/to/.env
 #   2. GCLOUD_ENV_FILE=/path/to/.env
-#   3. $SCRIPT_DIR/.env
+#   3. $PWD/.env
+#   4. $SCRIPT_DIR/.env
 #
 ENV_FILE="${GCLOUD_ENV_FILE:-}"
 
@@ -29,7 +30,11 @@ if [[ "${1:-}" == "--env" ]]; then
 fi
 
 if [[ -z "$ENV_FILE" ]]; then
-  ENV_FILE="$SCRIPT_DIR/.env"
+  if [[ -f "$PWD/.env" ]]; then
+    ENV_FILE="$PWD/.env"
+  else
+    ENV_FILE="$SCRIPT_DIR/.env"
+  fi
 fi
 
 if [[ -f "$ENV_FILE" ]]; then
