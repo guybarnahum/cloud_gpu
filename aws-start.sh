@@ -232,18 +232,23 @@ wait_for_instance_state() {
   while [[ $elapsed_seconds -lt $timeout_seconds ]]; do
     local state_output
     if ! state_output=$(aws_ec2_describe_instance_state 2>&1); then
+      printf "\n"
       echo "❌ Error while checking instance state:" >&2
       echo "$state_output" >&2
       return 1
     fi
 
-    echo "   Current state: $state_output"
-    [[ "$state_output" == "$target_state" ]] && return 0
+    printf "   Current state: %-20s\r" "$state_output"
+    if [[ "$state_output" == "$target_state" ]]; then
+      printf "\n"
+      return 0
+    fi
 
     sleep "$check_interval_seconds"
     elapsed_seconds=$((elapsed_seconds + check_interval_seconds))
   done
 
+  printf "\n"
   echo "❌ Error: Timed out after $timeout_seconds seconds waiting for '$target_state'."
   return 1
 }
