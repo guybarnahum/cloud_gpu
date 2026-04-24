@@ -3,12 +3,36 @@ set -e
 
 # --- Get script directory and load environment variables ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd "$SCRIPT_DIR"
 
-if [[ -f ".env" ]]; then 
+# Optional env-file override.
+#
+# Precedence:
+#   1. --env /path/to/.env
+#   2. AWS_ENV_FILE=/path/to/.env
+#   3. $SCRIPT_DIR/.env
+#
+ENV_FILE="${AWS_ENV_FILE:-}"
+
+if [[ "${1:-}" == "--env" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "❌ Error: --env requires a path to an env file." >&2
+    exit 1
+  fi
+  ENV_FILE="$2"
+  shift 2
+fi
+
+if [[ -z "$ENV_FILE" ]]; then
+  ENV_FILE="$SCRIPT_DIR/.env"
+fi
+
+if [[ -f "$ENV_FILE" ]]; then
+  echo "Using env file: $ENV_FILE"
   set -a            # Automatically export all variables
-  source .env
+  source "$ENV_FILE"
   set +a            # Stop auto-exporting
+else
+  echo "No env file found at: $ENV_FILE"
 fi
 
 # --- Argument parsing ---
@@ -82,7 +106,7 @@ echo "✅ Instance IP is $PUBLIC_IP"
 REMOTE_SCRIPT_PATH="/tmp/aws-stream-ec2.sh"
 echo "🚀 Uploading streaming script to instance..."
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -i "$AWS_EC2_PEM_FILE" "aws-stream-ec2.sh" "ubuntu@$PUBLIC_IP:$REMOTE_SCRIPT_PATH" > /dev/null
+  -i "$AWS_EC2_PEM_FILE" "$SCRIPT_DIR/aws-stream-ec2.sh" "ubuntu@$PUBLIC_IP:$REMOTE_SCRIPT_PATH" > /dev/null
 
 # --- 1. Start SSH tunnel in background ---
 echo "🚇 Establishing SSH tunnel (Local 8080 -> Remote 8080)..."

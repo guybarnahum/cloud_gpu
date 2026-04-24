@@ -4,16 +4,41 @@ set -e
 # --- Get the directory of the script and change to it ---
 # This ensures the script can find its related files, like .env
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd "$SCRIPT_DIR"
 
 # gcloud-start.sh: Starts a GCE instance and connects via SSH.
 #
 # Usage: $0 [instance_id] [zone]
 # Arguments will override values in the .gcloud_instance config file.
 
-# --- Read config file (if it exists) ---
-if [[ -f ".env" ]]; then
-  source .env
+# Optional env-file override.
+#
+# Precedence:
+#   1. --env /path/to/.env
+#   2. GCLOUD_ENV_FILE=/path/to/.env
+#   3. $SCRIPT_DIR/.env
+#
+ENV_FILE="${GCLOUD_ENV_FILE:-}"
+
+if [[ "${1:-}" == "--env" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "❌ Error: --env requires a path to an env file." >&2
+    exit 1
+  fi
+  ENV_FILE="$2"
+  shift 2
+fi
+
+if [[ -z "$ENV_FILE" ]]; then
+  ENV_FILE="$SCRIPT_DIR/.env"
+fi
+
+if [[ -f "$ENV_FILE" ]]; then
+  echo "Using env file: $ENV_FILE"
+  set -a
+  source "$ENV_FILE"
+  set +a
+else
+  echo "No env file found at: $ENV_FILE"
 fi
 
 # --- Use arguments or fall back to config file ---
