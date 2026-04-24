@@ -40,6 +40,8 @@ else
   echo "No env file found at: $ENV_FILE"
 fi
 
+AWS_SSH_USER="${AWS_SSH_USER:-ubuntu}"
+
 # --- Argument parsing ---
 REMOTE_VIDEO_PATH="${1}"
 AWS_EC2_INSTANCE_ID="${2:-$AWS_EC2_INSTANCE_ID}"
@@ -58,7 +60,6 @@ if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_DEFAULT_REGION" || -z "$AWS_EC2_PEM_
   exit 1
 fi
 
-echo "Using Access Key ID: ${AWS_ACCESS_KEY_ID}"
 echo "Using Region: ${AWS_DEFAULT_REGION}"
 
 # --- Validate PEM file ---
@@ -87,7 +88,7 @@ cleanup() {
   echo ""
   echo "🧹 Closing background SSH master connection..."
   if [[ -S "$CTRL_SOCK" ]]; then
-    ssh -S "$CTRL_SOCK" -O exit "ubuntu@$PUBLIC_IP" 2>/dev/null || true
+    ssh -S "$CTRL_SOCK" -O exit "$AWS_SSH_USER@$PUBLIC_IP" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -111,7 +112,7 @@ echo "✅ Instance IP is $PUBLIC_IP"
 REMOTE_SCRIPT_PATH="/tmp/aws-stream-ec2.sh"
 echo "🚀 Uploading streaming script to instance..."
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  -i "$AWS_EC2_PEM_FILE" "$SCRIPT_DIR/aws-stream-ec2.sh" "ubuntu@$PUBLIC_IP:$REMOTE_SCRIPT_PATH" > /dev/null
+  -i "$AWS_EC2_PEM_FILE" "$SCRIPT_DIR/aws-stream-ec2.sh" "$AWS_SSH_USER@$PUBLIC_IP:$REMOTE_SCRIPT_PATH" > /dev/null
 
 # --- 1. Start SSH tunnel in background ---
 echo "🚇 Establishing SSH tunnel (Local 8080 -> Remote 8080)..."
@@ -121,7 +122,7 @@ ssh -M -S "$CTRL_SOCK" -fnN \
     -o "UserKnownHostsFile=/dev/null" \
     -L 127.0.0.1:8080:localhost:8080 \
     -i "$AWS_EC2_PEM_FILE" \
-    "ubuntu@$PUBLIC_IP"
+    "$AWS_SSH_USER@$PUBLIC_IP"
 
 # --- 2. Poll for tunnel readiness (Using your millisecond logic) ---
 echo "⏳ Waiting for tunnel..."
@@ -151,4 +152,4 @@ sleep 2
 
 # --- 4. Start Remote Stream ---
 echo "▶️ Starting remote FFmpeg stream. Press CTRL+C to stop."
-ssh -S "$CTRL_SOCK" "ubuntu@$PUBLIC_IP" "bash $REMOTE_SCRIPT_PATH \"$REMOTE_VIDEO_PATH\""
+ssh -S "$CTRL_SOCK" "$AWS_SSH_USER@$PUBLIC_IP" "bash $REMOTE_SCRIPT_PATH \"$REMOTE_VIDEO_PATH\""

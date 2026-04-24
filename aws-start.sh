@@ -41,6 +41,8 @@ else
   echo "No env file found at: $ENV_FILE"
 fi
 
+AWS_SSH_USER="${AWS_SSH_USER:-ubuntu}"
+
 # --- SMART ARGUMENT PARSING ---
 # Initialize with Env Vars (defaults)
 _INSTANCE_ID="${AWS_EC2_INSTANCE_ID}"
@@ -96,7 +98,6 @@ if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_DEFAULT_REGION" || -z "$AWS_EC2_PEM_
   exit 1
 fi
 
-echo "Using Access Key ID: ${AWS_ACCESS_KEY_ID}"
 echo "Using Region: ${AWS_DEFAULT_REGION}"
 if [[ ${#SSH_EXTRA_ARGS[@]} -gt 0 ]]; then
   echo "Passing Extra Args to SSH: ${SSH_EXTRA_ARGS[*]}"
@@ -120,6 +121,60 @@ if [[ "$PEM_PERMS" != "400" ]]; then
   echo "⚠️  Warning: PEM file permissions are not correct (should be 400, but are $PEM_PERMS)."
   echo "    To fix, run: chmod 400 \"$AWS_EC2_PEM_FILE\""
 fi
+
+aws_ec2_describe_instance_state() {
+  aws ec2 describe-instances \
+    --instance-ids "$AWS_EC2_INSTANCE_ID" \
+    --region "$AWS_DEFAULT_REGION" \
+    --query 'Reservations[0].Instances[0].State.Name' \
+    --output text
+}
+
+aws_ec2_describe_public_ip() {
+  aws ec2 describe-instances \
+    --instance-ids "$AWS_EC2_INSTANCE_ID" \
+    --region "$AWS_DEFAULT_REGION" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' \
+    --output text
+}
+
+validate_aws_access() {
+  echo "🔐 Validating AWS caller and EC2 describe permissions..."
+
+  local identity
+  if ! identity=$(aws sts get-caller-identity --output text 2>&1); then
+    echo "❌ Error: Unable to read AWS caller identity." >&2
+    echo "$identity" >&2
+    exit 1
+  fi
+
+  local account arn
+  account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+  arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null || true)
+
+  echo "Using AWS Account: ${account:-unknown}"
+  echo "Using AWS Principal: ${arn:-unknown}"
+
+  local describe_output
+  if ! describe_output=$(aws_ec2_describe_instance_state 2>&1); then
+    echo "❌ Error: Unable to describe instance $AWS_EC2_INSTANCE_ID in $AWS_DEFAULT_REGION." >&2
+    echo "$describe_output" >&2
+
+    if grep -q "UnauthorizedOperation" <<< "$describe_output"; then
+      echo "" >&2
+      echo "Missing permission: ec2:DescribeInstances" >&2
+      echo "Ask the AWS account owner to allow ec2:DescribeInstances for this IAM user/role." >&2
+    elif grep -q "InvalidInstanceID.NotFound" <<< "$describe_output"; then
+      echo "" >&2
+      echo "The instance was not found in this AWS account/region." >&2
+      echo "Check AWS account, region, and instance ID." >&2
+    fi
+
+    exit 1
+  fi
+
+  echo "✅ Instance is visible. Current state: $describe_output"
+}
 
 # Spinner function:
 #
@@ -168,10 +223,29 @@ run_with_spinner() {
 # --- Check Functions ---
 wait_for_instance_state() {
   local target_state="$1"
-  local description="⏳ Waiting for instance to enter '$target_state' state..."
-  # This command succeeds (exit code 0) only if grep finds the target state
-  local check_cmd="aws ec2 describe-instances --instance-ids '$AWS_EC2_INSTANCE_ID' --region '$AWS_DEFAULT_REGION' --query 'Reservations[].Instances[].State.Name' --output text 2>/dev/null | grep -q '$target_state'"
-  run_with_spinner "$description" "$check_cmd" 300 5
+  local timeout_seconds=300
+  local check_interval_seconds=5
+  local elapsed_seconds=0
+
+  echo "⏳ Waiting for instance to enter '$target_state' state..."
+
+  while [[ $elapsed_seconds -lt $timeout_seconds ]]; do
+    local state_output
+    if ! state_output=$(aws_ec2_describe_instance_state 2>&1); then
+      echo "❌ Error while checking instance state:" >&2
+      echo "$state_output" >&2
+      return 1
+    fi
+
+    echo "   Current state: $state_output"
+    [[ "$state_output" == "$target_state" ]] && return 0
+
+    sleep "$check_interval_seconds"
+    elapsed_seconds=$((elapsed_seconds + check_interval_seconds))
+  done
+
+  echo "❌ Error: Timed out after $timeout_seconds seconds waiting for '$target_state'."
+  return 1
 }
 
 wait_for_ssh_ready() {
@@ -183,24 +257,22 @@ wait_for_ssh_ready() {
 }
 
 # --- Main Execution ---
+validate_aws_access
+
 echo "🚀 Starting instance $AWS_EC2_INSTANCE_ID in region $AWS_DEFAULT_REGION..."
 aws ec2 start-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_DEFAULT_REGION" > /dev/null
 echo "✅ Instance start request sent."
 
 if ! wait_for_instance_state "running"; then
-  echo "🛑 Stopping instance due to timeout..."
+  echo "🛑 Not continuing because the instance did not reach running state."
   aws ec2 stop-instances --instance-ids "$AWS_EC2_INSTANCE_ID" --region "$AWS_DEFAULT_REGION" > /dev/null
   exit 1
 fi
 
 echo "🔎 Retrieving public IP address..."
-PUBLIC_IP=$(aws ec2 describe-instances \
-  --instance-ids "$AWS_EC2_INSTANCE_ID" \
-  --region "$AWS_DEFAULT_REGION" \
-  --query 'Reservations[].Instances[].PublicIpAddress' \
-  --output text)
+PUBLIC_IP=$(aws_ec2_describe_public_ip)
 
-if [[ -z "$PUBLIC_IP" ]]; then
+if [[ -z "$PUBLIC_IP" || "$PUBLIC_IP" == "None" ]]; then
   echo "❌ Error: Failed to retrieve public IP address. Check the instance's state." >&2
   exit 1
 fi
@@ -214,10 +286,10 @@ if ! wait_for_ssh_ready "$PUBLIC_IP"; then
 fi
 
 echo "✅ SSH service is ready."
-echo "🔗 Connecting via SSH to ubuntu@$PUBLIC_IP..."
+echo "🔗 Connecting via SSH to $AWS_SSH_USER@$PUBLIC_IP..."
 
 # Execute SSH with the collected extra args
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -i "$AWS_EC2_PEM_FILE" \
     "${SSH_EXTRA_ARGS[@]}" \
-    ubuntu@"$PUBLIC_IP"
+  "$AWS_SSH_USER"@"$PUBLIC_IP"

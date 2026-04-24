@@ -45,6 +45,8 @@ else
   echo "No env file found at: $ENV_FILE"
 fi
 
+AWS_SSH_USER="${AWS_SSH_USER:-ubuntu}"
+
 # --- Argument parsing ---
 LOCAL_PATH="${1}"
 REMOTE_PATH="${2}"
@@ -71,7 +73,6 @@ if [[ -z "$AWS_EC2_INSTANCE_ID" || -z "$AWS_DEFAULT_REGION" || -z "$AWS_EC2_PEM_
   exit 1
 fi
 
-echo "Using Access Key ID: ${AWS_ACCESS_KEY_ID}"
 echo "Using Region: ${AWS_DEFAULT_REGION}"
 
 # --- Validate PEM file ---
@@ -108,10 +109,10 @@ if [[ -z "$PUBLIC_IP" || "$PUBLIC_IP" == "None" ]]; then
 fi
 
 echo "✅ Instance IP is $PUBLIC_IP"
-echo "🚀 Copying '$LOCAL_PATH' to 'ubuntu@$PUBLIC_IP:$REMOTE_PATH'..."
+echo "🚀 Copying '$LOCAL_PATH' to '$AWS_SSH_USER@$PUBLIC_IP:$REMOTE_PATH'..."
 
 # --- Copy the file using scp ---
 # -r allows for recursive directory copying
-scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$AWS_EC2_PEM_FILE" "$LOCAL_PATH" "ubuntu@$PUBLIC_IP:$REMOTE_PATH"
+scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$AWS_EC2_PEM_FILE" "$LOCAL_PATH" "$AWS_SSH_USER@$PUBLIC_IP:$REMOTE_PATH"
 
 echo "✅ Copy complete."
